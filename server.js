@@ -2,8 +2,9 @@ const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
 const app = express();
+
 app.use(cors());
-app.use(express.json()); // For receiving JSON payloads from webhook
+app.use(express.json()); // Enable JSON body parsing for webhook
 
 const API_KEY = '5db71e12-a4df-4afe-aca9-0ff423b89c11';
 
@@ -22,14 +23,13 @@ const WALLETS = {
   },
 };
 
-// Store live activity logs (20 per agent max)
 const activityLog = {
   Arthemis: [],
   Zeus: [],
   Oracle: [],
 };
 
-// 📦 BALANCE ENDPOINT
+// ✅ Balance and PNL API
 app.get('/api/balance/:agent', async (req, res) => {
   const { agent } = req.params;
   const wallet = WALLETS[agent];
@@ -47,26 +47,32 @@ app.get('/api/balance/:agent', async (req, res) => {
   }
 });
 
-// 📥 WEBHOOK RECEIVER
+// ✅ Webhook handler
 app.post('/api/webhook', (req, res) => {
   const { events } = req.body;
-  if (!Array.isArray(events)) return res.status(400).json({ error: 'No events array' });
+  if (!Array.isArray(events)) return res.status(400).json({ error: 'Invalid webhook payload' });
 
   for (const event of events) {
-    const swap = event.events?.swap;
-    if (!swap || !swap.amountIn || !swap.tokenSwap?.mint) continue;
-
     const walletMatch = Object.entries(WALLETS).find(([, val]) =>
       event.accountData?.some(acc => acc.account === val.address)
     );
     if (!walletMatch) continue;
 
     const [agent] = walletMatch;
-    const amount = parseFloat(swap.amountIn).toFixed(2);
-    const token = swap.tokenSwap.mint.slice(0, 4).toUpperCase();
-    const direction = swap.nativeInput ? 'bought' : 'sold';
+    let log;
 
-    const log = `${direction} ${amount} SOL of $${token}`;
+    const swap = event.events?.swap;
+    if (swap && swap.amountIn && swap.tokenSwap?.mint) {
+      const amount = parseFloat(swap.amountIn).toFixed(2);
+      const token = swap.tokenSwap.mint.slice(0, 4).toUpperCase();
+      const direction = swap.nativeInput ? 'bought' : 'sold';
+      log = `${direction} ${amount} SOL of $${token}`;
+    } else {
+      const sig = event.signature?.slice(0, 8) || 'unknown';
+      const symbol = event.description?.tokenSymbol || '???';
+      log = `Activity (${symbol}) — tx ${sig}`;
+    }
+
     activityLog[agent].unshift(log);
     if (activityLog[agent].length > 20) activityLog[agent].pop();
   }
@@ -74,11 +80,10 @@ app.post('/api/webhook', (req, res) => {
   res.status(200).send('ok');
 });
 
-// 🔁 FRONTEND GETS TX LOGS
+// ✅ Public TX logs endpoint
 app.get('/api/txlog/:agent', (req, res) => {
   const { agent } = req.params;
-  const logs = activityLog[agent] || [];
-  res.json(logs.slice(0, 20));
+  res.json(activityLog[agent] || []);
 });
 
 const PORT = 3001;
