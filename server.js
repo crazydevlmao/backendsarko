@@ -48,32 +48,25 @@ app.get('/api/balance/:agent', async (req, res) => {
 });
 
 // 📥 WEBHOOK RECEIVER
-app.post('/webhook', (req, res) => {
-  const body = req.body;
+app.post('/api/webhook', (req, res) => {
+  const { events } = req.body;
+  if (!Array.isArray(events)) return res.status(400).json({ error: 'No events array' });
 
-  if (!body || !body.events) return res.status(400).json({ error: 'No data' });
-
-  for (const event of body.events) {
-    const { type, description, events: evtDetails } = event;
-    if (type !== 'SWAP') continue;
-
-    const swap = evtDetails?.swap;
+  for (const event of events) {
+    const swap = event.events?.swap;
     if (!swap || !swap.amountIn || !swap.tokenSwap?.mint) continue;
 
     const walletMatch = Object.entries(WALLETS).find(([, val]) =>
-      event.accountData.some(acc => acc.account === val.address)
+      event.accountData?.some(acc => acc.account === val.address)
     );
-
     if (!walletMatch) continue;
-    const [agent, wallet] = walletMatch;
 
+    const [agent] = walletMatch;
     const amount = parseFloat(swap.amountIn).toFixed(2);
     const token = swap.tokenSwap.mint.slice(0, 4).toUpperCase();
     const direction = swap.nativeInput ? 'bought' : 'sold';
 
     const log = `${direction} ${amount} SOL of $${token}`;
-
-    // Add to top of log
     activityLog[agent].unshift(log);
     if (activityLog[agent].length > 20) activityLog[agent].pop();
   }
